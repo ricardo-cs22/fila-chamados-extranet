@@ -123,10 +123,21 @@ Confere ($html -match 'Erro em &lt;b&gt;A &amp; B&lt;/b&gt;&lt;script&gt;' -and 
 $RelDir = Join-Path $env:TEMP 'FilaChamadosTeste-relatorios'
 [void](New-Item -ItemType Directory -Force -Path $RelDir)
 Set-Content -LiteralPath (Join-Path $RelDir 'relatorio-horas-2026-10-01-a-2026-10-31.pdf') -Value 'pdf'
+Set-Content -LiteralPath (Join-Path $RelDir 'historico-2026-10-16.pdf') -Value 'pdf'
+Set-Content -LiteralPath (Join-Path $RelDir 'historico.csv') -Value 'planilha'
 Set-Content -LiteralPath (Join-Path $RelDir 'outro.txt') -Value 'fica'
 Remove-RelatoriosPdf
-Confere (-not (Test-Path -LiteralPath (Join-Path $RelDir 'relatorio-horas-2026-10-01-a-2026-10-31.pdf')) -and (Test-Path -LiteralPath (Join-Path $RelDir 'outro.txt'))) 'relatorio: o PDF temporario e apagado, e so ele'
+Confere (-not (Test-Path -LiteralPath (Join-Path $RelDir 'relatorio-horas-2026-10-01-a-2026-10-31.pdf')) -and -not (Test-Path -LiteralPath (Join-Path $RelDir 'historico-2026-10-16.pdf')) -and (Test-Path -LiteralPath (Join-Path $RelDir 'historico.csv')) -and (Test-Path -LiteralPath (Join-Path $RelDir 'outro.txt'))) 'pdf: o do relatorio e o do historico sao apagados, e so eles'
 Remove-Item -LiteralPath $RelDir -Recurse -Force
+
+# historico em PDF: uma linha por chamado, texto escapado, link so de chamado da Extranet
+$hp = @(
+    [pscustomobject]@{ codigo = '100001'; saiuEm = '2026-10-08T21:38:19.000Z'; statusFinal = ''; ultimoStatus = 'Aprovado Code Review'; responsavelAtual = 'FILA DE TESTE'; tipo = 'Incidência'; cliente = 'CLIENTE EXEMPLO A'; titulo = 'Erro em <b>A & B</b><script>x()</script>'; criacao = '06/10/2026'; horasEstimadas = '1,50'; horasRealizadas = '2,68'; url = $ChamadoUrl + '100001' },
+    [pscustomobject]@{ codigo = '100002'; saiuEm = ''; statusFinal = 'Homologado'; responsavelAtual = 'BRUNO COSTA (EQUIPE 1)'; tipo = 'Consultoria'; cliente = 'CLIENTE EXEMPLO B'; titulo = 'importado'; criacao = '05/02/2026'; url = 'javascript:alert(1)' })
+$html = Get-HtmlHistorico $hp
+Confere ($html -match '<div class="sub">2 chamados' -and $html -match ('<a href="' + [regex]::Escape($ChamadoUrl) + '100001">100001</a>') -and $html -match ('<td>' + (Get-DataLocal '2026-10-08T21:38:19.000Z').ToString('dd/MM/yyyy') + '</td>')) 'historico em PDF: total, link do chamado e dia em que saiu'
+Confere ($html -match '<td>Aprovado Code Review</td>' -and $html -match '<td>Homologado</td>' -and $html -match '<td class="n">1,50 h</td><td class="n">2,68 h</td>' -and $html -match '<td class="n">-</td><td class="n">-</td>') 'historico em PDF: status final ou o ultimo da fila, horas ou traco'
+Confere ($html -match 'Erro em &lt;b&gt;A &amp; B&lt;/b&gt;&lt;script&gt;' -and $html -notmatch '<script' -and $html -notmatch 'javascript:' -and $html -match '<td>100002</td>') 'historico em PDF: titulo entra como texto e endereco que nao e da Extranet nao vira link'
 
 # ---------------------------------------------------------------- calendario
 $fila = @([pscustomobject]@{ codigo = '1'; criacao = '23/06/2026' }, [pscustomobject]@{ codigo = '2'; criacao = '' })

@@ -184,6 +184,8 @@ O histórico mostra também as horas DEV estimadas e realizadas de cada chamado.
 
 Para ver o histórico no Excel, clique com o botão direito no painel e escolha **Abrir histórico no Excel**. A planilha é gerada na hora em que você abre, numa pasta só sua, e apagada quando você fecha o painel. Se quiser guardar uma cópia, use **Salvar como** no Excel.
 
+Para ver em PDF, escolha **Abrir histórico em PDF**: o histórico inteiro, do chamado que saiu por último para o mais antigo, numa folha A4 deitada com status, com quem está, cliente, título e horas. Como a planilha, o PDF é temporário e é apagado quando você fecha o painel.
+
 #### Importar chamados antigos
 
 O histórico começa no dia em que você instalou o painel. Para trazer os chamados de antes, clique com o botão direito no painel e escolha **Importar meus chamados da Extranet para o histórico…**.
@@ -239,6 +241,7 @@ Clique com o botão direito em qualquer ponto do painel.
 | **Copiar código e título** | Copia código e título, prontos para colar em uma mensagem |
 | **Abrir minha fila na Extranet** | Abre a lista completa no seu navegador |
 | **Abrir histórico no Excel** | Gera a planilha do histórico e abre no Excel |
+| **Abrir histórico em PDF** | Gera o histórico em PDF e abre |
 | **Relatório de horas acima do estimado…** | Gera o relatório do período escolhido e abre em PDF |
 | **Iniciar execução** / **Pausar execução** | No chamado da fila em que você clicou: faz o mesmo que o botão de iniciar ou pausar da lista da Extranet e lê a fila de novo. Avisa se a Extranet não aceitou |
 | **Importar meus chamados da Extranet para o histórico…** | Traz para o histórico os chamados em que você é o desenvolvedor, abertos desde o início do ano |

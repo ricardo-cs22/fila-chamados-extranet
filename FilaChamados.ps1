@@ -593,12 +593,19 @@ function On-NavegacaoIniciada($e) {
     }
 }
 
-# Navegador do painel (criado no primeiro uso, depois que a janela principal ja abriu)
-function Initialize-Web {
-    if ($script:web) { return }
+# Carrega as DLLs do WebView2 uma vez so: o navegador da fila e o que imprime os PDFs usam as mesmas
+function Import-WebView2 {
+    if ($script:webview2Pronto) { return }
     Add-Type -Path (Join-Path $WebDir 'Microsoft.Web.WebView2.Core.dll')
     Add-Type -Path (Join-Path $WebDir 'Microsoft.Web.WebView2.Wpf.dll')
     [Microsoft.Web.WebView2.Core.CoreWebView2Environment]::SetLoaderDllFolderPath($WebDir)
+    $script:webview2Pronto = $true
+}
+
+# Navegador do painel (criado no primeiro uso, depois que a janela principal ja abriu)
+function Initialize-Web {
+    if ($script:web) { return }
+    Import-WebView2
     $w = New-Object System.Windows.Window
     $w.Title = 'Entrar na Extranet - mininet'
     $w.Width = 520; $w.Height = 700
@@ -916,6 +923,27 @@ function Get-LinhasRelatorio($paginas, $det, [datetime]$ini, [datetime]$fim) {
     }
 }
 
+# Estilo das folhas em PDF (relatorio de horas e historico): clara, para imprimir
+function Get-CssPdf {
+    return @'
+body { font: 10pt 'Segoe UI', Arial, sans-serif; color: #1f2125; background: #fff; margin: 0; -webkit-print-color-adjust: exact; }
+h1 { font-size: 15pt; margin: 0 0 2pt; }
+.sub { color: #5f6368; margin-bottom: 10pt; }
+.res { display: flex; gap: 8pt; margin-bottom: 10pt; }
+.res div { border: 1px solid #d0d4da; border-radius: 6pt; padding: 5pt 10pt; color: #5f6368; }
+.res b { display: block; font-size: 13pt; color: #1f2125; }
+table { width: 100%; border-collapse: collapse; }
+thead { display: table-header-group; }
+th { background: #1f2125; color: #fff; text-align: left; font-weight: 600; padding: 5pt 6pt; }
+td { padding: 4pt 6pt; border-bottom: 1px solid #e3e6ea; vertical-align: top; }
+tr { break-inside: avoid; }
+.n { text-align: right; white-space: nowrap; }
+.res b.x, td.x { color: #b91c1c; font-weight: 600; }
+a { color: #1d4ed8; text-decoration: none; }
+.obs { color: #5f6368; font-size: 8.5pt; margin-top: 10pt; }
+'@
+}
+
 # O relatorio em HTML, de folha clara para imprimir; o navegador do painel transforma em PDF
 function Get-HtmlRelatorio($linhas, [datetime]$ini, [datetime]$fim, [string]$aviso) {
     $br = [Globalization.CultureInfo]::GetCultureInfo('pt-BR')
@@ -929,22 +957,8 @@ function Get-HtmlRelatorio($linhas, [datetime]$ini, [datetime]$fim, [string]$avi
     return @"
 <!doctype html>
 <html lang="pt-BR"><head><meta charset="utf-8"><title>Relatório de horas acima do estimado</title><style>
-body { font: 10pt 'Segoe UI', Arial, sans-serif; color: #1f2125; background: #fff; margin: 0; -webkit-print-color-adjust: exact; }
-h1 { font-size: 15pt; margin: 0 0 2pt; }
-.sub { color: #5f6368; margin-bottom: 10pt; }
-.res { display: flex; gap: 8pt; margin-bottom: 10pt; }
-.res div { border: 1px solid #d0d4da; border-radius: 6pt; padding: 5pt 10pt; color: #5f6368; }
-.res b { display: block; font-size: 13pt; color: #1f2125; }
-table { width: 100%; border-collapse: collapse; }
-thead { display: table-header-group; }
-th { background: #1f2125; color: #fff; text-align: left; font-weight: 600; padding: 5pt 6pt; }
-td { padding: 4pt 6pt; border-bottom: 1px solid #e3e6ea; vertical-align: top; }
-tr { break-inside: avoid; }
-.n, td:nth-child(4), td:nth-child(9) { white-space: nowrap; }
-.n { text-align: right; }
-.res b.x, td.x { color: #b91c1c; font-weight: 600; }
-a { color: #1d4ed8; text-decoration: none; }
-.obs { color: #5f6368; font-size: 8.5pt; margin-top: 10pt; }
+$(Get-CssPdf)
+td:nth-child(4), td:nth-child(9) { white-space: nowrap; }
 </style></head><body>
 <h1>Relatório de horas acima do estimado</h1>
 <div class="sub">Chamados com horas DEV realizadas acima das estimadas que tiveram Aguardando Homologação de $($ini.ToString('dd/MM/yyyy')) a $($fim.ToString('dd/MM/yyyy'))</div>
@@ -956,6 +970,54 @@ $($tr -join "`n")
 <div class="obs">Gerado em $((Get-Date).ToString('dd/MM/yyyy HH:mm')) pelo mininet, com os chamados da fila e do histórico do painel. $(& $e $aviso)</div>
 </body></html>
 "@
+}
+
+# O historico em HTML para o PDF: um chamado por linha, na ordem recebida (quem saiu por ultimo primeiro)
+function Get-HtmlHistorico($hist) {
+    $e = { param($s) [System.Net.WebUtility]::HtmlEncode([string]$s) }
+    $tr = @($hist | ForEach-Object {
+            $d = Get-DataLocal $_.saiuEm
+            $saiu = ''
+            if ($d) { $saiu = $d.ToString('dd/MM/yyyy') }
+            $status = [string]$_.statusFinal
+            if (-not $status) { $status = [string]$_.ultimoStatus }
+            # so vira link o endereco da propria Extranet, de chamado com codigo numerico
+            $cod = & $e $_.codigo
+            if ([string]$_.codigo -match '^\d+$' -and [string]$_.url -match '^https://') { $cod = '<a href="{0}">{1}</a>' -f (& $e $_.url), $cod }
+            '<tr><td>{0}</td><td>{1}</td><td>{2}</td><td>{3}</td><td>{4}</td><td>{5}</td><td>{6}</td><td>{7}</td><td class="n">{8}</td><td class="n">{9}</td></tr>' -f
+            $cod, $saiu, (& $e $status), (& $e $_.responsavelAtual), (& $e $_.tipo), (& $e $_.cliente), (& $e $_.titulo), (& $e $_.criacao), (& $e (Get-TextoHoras ([string]$_.horasEstimadas))), (& $e (Get-TextoHoras ([string]$_.horasRealizadas)))
+        })
+    return @"
+<!doctype html>
+<html lang="pt-BR"><head><meta charset="utf-8"><title>Histórico da fila</title><style>
+$(Get-CssPdf)
+td:nth-child(1), td:nth-child(2), td:nth-child(5), td:nth-child(8) { white-space: nowrap; }
+</style></head><body>
+<h1>Histórico da fila</h1>
+<div class="sub">$(@($hist).Count) chamados que saíram da sua fila, do mais recente para o mais antigo</div>
+<table><thead><tr><th>Código</th><th>Saiu em</th><th>Status</th><th>Com quem</th><th>Tipo</th><th>Cliente</th><th>Título</th><th>Criado em</th><th class="n">Estimado</th><th class="n">Realizado</th></tr></thead>
+<tbody>
+$($tr -join "`n")
+</tbody></table>
+<div class="obs">Gerado em $((Get-Date).ToString('dd/MM/yyyy HH:mm')) pelo mininet.</div>
+</body></html>
+"@
+}
+
+# O historico inteiro em PDF, temporario como a planilha: fica em %LOCALAPPDATA% e e apagado quando o painel fecha
+function Open-HistoricoPdf {
+    $h = Get-Historico
+    $hist = @($h | Sort-Object { Get-Stamp $_.saiuEm } -Descending)
+    if ($hist.Count -eq 0) {
+        [void][System.Windows.MessageBox]::Show('O histórico ainda está vazio. Ele começa a encher quando um chamado sair da sua fila.', 'mininet')
+        return
+    }
+    if (-not (Test-Path -LiteralPath (Join-Path $WebDir 'Microsoft.Web.WebView2.Wpf.dll'))) {
+        [void][System.Windows.MessageBox]::Show('Falta a pasta webview2 com o navegador do painel: sem ela não dá para gerar o PDF.', 'mininet')
+        return
+    }
+    $arq = Join-Path $RelDir "historico-$((Get-Date).ToString('yyyy-MM-dd')).pdf"
+    try { Start-Pdf (Get-HtmlHistorico $hist) $arq } catch { Close-Pdf "Não consegui gerar o PDF do histórico: $($_.Exception.Message)" }
 }
 
 # paginas = leitura da pagina de cada chamado (fila + historico) que o leitor conseguiu abrir
@@ -986,6 +1048,7 @@ function Write-Relatorio($paginas) {
 # (fora da pasta do painel e do OneDrive) e e apagado quando o painel fecha
 function Start-Pdf([string]$html, [string]$arq) {
     Close-Pdf ''
+    Import-WebView2
     [void](New-Item -ItemType Directory -Force -Path (Split-Path -Parent $arq))
     $w = New-Object System.Windows.Window
     $w.Width = 400; $w.Height = 300
@@ -999,20 +1062,20 @@ function Start-Pdf([string]$html, [string]$arq) {
     $wv.Add_CoreWebView2InitializationCompleted({
             param($s, $e)
             try {
-                if (-not $e.IsSuccess) { Close-Pdf "Não consegui gerar o PDF do relatório: $($e.InitializationException.Message)"; return }
+                if (-not $e.IsSuccess) { Close-Pdf "Não consegui gerar o PDF: $($e.InitializationException.Message)"; return }
                 $script:pdf.janela.Hide()
                 $s.CoreWebView2.Settings.IsScriptEnabled = $false
                 $s.NavigateToString($script:pdf.html)
-            } catch { Close-Pdf "Não consegui gerar o PDF do relatório: $($_.Exception.Message)" }
+            } catch { Close-Pdf "Não consegui gerar o PDF: $($_.Exception.Message)" }
         })
-    $wv.Add_NavigationCompleted({ param($s, $e) try { Save-Pdf $e } catch { Close-Pdf "Não consegui gerar o PDF do relatório: $($_.Exception.Message)" } })
+    $wv.Add_NavigationCompleted({ param($s, $e) try { Save-Pdf $e } catch { Close-Pdf "Não consegui gerar o PDF: $($_.Exception.Message)" } })
     $w.Content = $wv
     $w.Add_ContentRendered({ if ($script:pdf) { [void]$script:pdf.web.EnsureCoreWebView2Async($null) } })
     # why: a impressao e assincrona e esperar por ela travaria a janela; um relogio confere ate terminar
     if (-not $script:pdfRelogio) {
         $script:pdfRelogio = New-Object System.Windows.Threading.DispatcherTimer
         $script:pdfRelogio.Interval = [timespan]::FromMilliseconds(200)
-        $script:pdfRelogio.Add_Tick({ try { Complete-Pdf } catch { Close-Pdf "Não consegui gerar o PDF do relatório: $($_.Exception.Message)" } })
+        $script:pdfRelogio.Add_Tick({ try { Complete-Pdf } catch { Close-Pdf "Não consegui gerar o PDF: $($_.Exception.Message)" } })
     }
     $script:pdfRelogio.Start()
     $w.Show()
@@ -1020,7 +1083,7 @@ function Start-Pdf([string]$html, [string]$arq) {
 
 function Save-Pdf($e) {
     if (-not $script:pdf -or $script:pdf.tarefa) { return }
-    if (-not $e.IsSuccess) { Close-Pdf "Não consegui montar o relatório ($($e.WebErrorStatus))."; return }
+    if (-not $e.IsSuccess) { Close-Pdf "Não consegui montar o PDF ($($e.WebErrorStatus))."; return }
     $core = $script:pdf.web.CoreWebView2
     $cfg = $core.Environment.CreatePrintSettings()
     $cfg.Orientation = 'Landscape'
@@ -1036,10 +1099,10 @@ function Complete-Pdf {
     if (-not $pdf) { $script:pdfRelogio.Stop(); return }
     $t = $pdf.tarefa
     if (-not $t -or -not $t.IsCompleted) {
-        if (((Get-Date) - $pdf.desde).TotalSeconds -ge 60) { Close-Pdf 'O PDF do relatório não ficou pronto em 60 segundos. Gere de novo.' }
+        if (((Get-Date) - $pdf.desde).TotalSeconds -ge 60) { Close-Pdf 'O PDF não ficou pronto em 60 segundos. Tente de novo.' }
         return
     }
-    if ($t.IsFaulted -or -not $t.Result) { Close-Pdf 'Não consegui gravar o PDF do relatório. Se ele está aberto, feche e gere de novo.'; return }
+    if ($t.IsFaulted -or -not $t.Result) { Close-Pdf 'Não consegui gravar o PDF. Se ele está aberto, feche e tente de novo.'; return }
     Close-Pdf ''
     Start-Process $pdf.arq
 }
@@ -1053,9 +1116,11 @@ function Close-Pdf([string]$erro) {
     if ($erro) { $script:avisoBusca = $erro; Render }
 }
 
-# os PDFs do relatorio de horas sao temporarios: somem quando o painel fecha (e na abertura seguinte, se um leitor de PDF segurou o arquivo)
+# os PDFs (relatorio de horas e historico) sao temporarios: somem quando o painel fecha (e na abertura seguinte, se um leitor de PDF segurou o arquivo)
 function Remove-RelatoriosPdf {
-    Get-ChildItem -LiteralPath $RelDir -Filter 'relatorio-horas-*.pdf' -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
+    foreach ($filtro in @('relatorio-horas-*.pdf', 'historico-*.pdf')) {
+        Get-ChildItem -LiteralPath $RelDir -Filter $filtro -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
+    }
 }
 # Proximo passo da importacao, a cada pagina da lista que abre (ou quando a busca avisa que terminou por AJAX)
 function Invoke-Importacao {
@@ -2084,6 +2149,8 @@ try {
     $mi.Add_Click({ if (-not $script:busca -and (Pedir-Extranet)) { Start-Busca 'manual' } }); [void]$menu.Items.Add($mi)
     $mi = New-Object System.Windows.Controls.MenuItem; $mi.Header = 'Abrir histórico no Excel'
     $mi.Add_Click({ Open-HistoricoExcel }); [void]$menu.Items.Add($mi)
+    $mi = New-Object System.Windows.Controls.MenuItem; $mi.Header = 'Abrir histórico em PDF'
+    $mi.Add_Click({ Open-HistoricoPdf }); [void]$menu.Items.Add($mi)
     $mi = New-Object System.Windows.Controls.MenuItem; $mi.Header = 'Relatório de horas acima do estimado…'
     $mi.Add_Click({ $per = Show-PeriodoRelatorio; if ($per) { Start-Relatorio $per.ini $per.fim } }); [void]$menu.Items.Add($mi)
     $mi = New-Object System.Windows.Controls.MenuItem; $mi.Header = 'Importar meus chamados da Extranet para o histórico…'
